@@ -6,15 +6,14 @@ from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardB
 from aiogram.utils import executor
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
-import aiohttp  # для работы с Google Таблицами (опционально)
+import aiohttp
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# --- Переменные окружения (обязательно добавить в Bothost) ---
+# --- Переменные окружения ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-PAYMENT_TOKEN = os.environ.get('PAYMENT_TOKEN')        # для платежей (тестовый от PayMaster)
-ADMIN_ID = int(os.environ.get('ADMIN_ID', 0))          # твой Telegram ID (узнай у @userinfobot)
+PAYMENT_TOKEN = os.environ.get('PAYMENT_TOKEN')
+ADMIN_ID = int(os.environ.get('ADMIN_ID', 0))
 
 if not BOT_TOKEN:
     raise ValueError("Нет BOT_TOKEN! Добавьте его в переменные окружения.")
@@ -27,8 +26,8 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # --- Глобальные данные (в реальном проекте лучше использовать БД) ---
-users = set()                    # множество user_id (для статистики и рассылки)
-orders = []                      # список заказов (для админки)
+users = set()
+orders = []
 
 # --- Состояния FSM ---
 class QuestionState(StatesGroup):
@@ -39,13 +38,13 @@ class OrderState(StatesGroup):
     phone = State()
     comment = State()
 
-# --- Товары (для каталога и платежей) ---
+# --- Товары ---
 products = {
     "gaming_pc": {
         "id": "gaming_pc",
         "title": "Игровой ПК \"Gamer Pro\"",
         "description": "Топовый компьютер для игр и работы на максимальных настройках.",
-        "price": 1500000,          # в копейках (15000.00 ₽)
+        "price": 1500000,
         "emoji": "🎮",
         "photo": "https://via.placeholder.com/300"
     },
@@ -53,7 +52,7 @@ products = {
         "id": "laptop",
         "title": "Ноутбук \"WorkMaster X\"",
         "description": "Мощный и легкий ноутбук для любых задач.",
-        "price": 800000,           # 8000.00 ₽
+        "price": 800000,
         "emoji": "💻",
         "photo": "https://via.placeholder.com/300"
     },
@@ -61,24 +60,20 @@ products = {
 
 # --- Клавиатуры ---
 def main_keyboard(user_id=None):
-    """Главное меню (для обычных пользователей и админа)"""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("💬 Задать вопрос"))
     kb.add(KeyboardButton("🛍️ Каталог"), KeyboardButton("📞 Контакты"))
     kb.add(KeyboardButton("✍️ Оставить заявку"))
-    # Если пользователь – админ, добавляем спец. кнопки
     if user_id == ADMIN_ID:
         kb.add(KeyboardButton("👑 Админ-панель"))
     return kb
 
 def back_keyboard():
-    """Кнопка возврата в главное меню"""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("🏠 В главное меню"))
     return kb
 
 def admin_keyboard():
-    """Клавиатура для админ-панели"""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("📊 Статистика"))
     kb.add(KeyboardButton("📢 Сделать рассылку"))
@@ -89,7 +84,7 @@ def admin_keyboard():
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: Message):
     user_id = message.from_user.id
-    users.add(user_id)  # запоминаем пользователя
+    users.add(user_id)
     await message.answer(
         f"👋 *Привет, {message.from_user.first_name}!*\n\n"
         f"Я — бот магазина электроники. Я помогу:\n"
@@ -123,7 +118,6 @@ async def handle_question(message: Message, state: FSMContext):
     await message.answer("🤔 *Думаю над ответом...*", parse_mode="Markdown")
     await asyncio.sleep(1.5)
 
-    # Простая логика (можно заменить на вызов реального ИИ)
     if "ноутбук" in question:
         answer = f"✅ *Рекомендую:*\n{products['laptop']['emoji']} {products['laptop']['title']}"
     elif "пк" in question or "компьютер" in question or "игр" in question:
@@ -176,7 +170,7 @@ async def back_to_catalog(callback: CallbackQuery):
     await callback.message.delete()
     await show_catalog(callback.message)
 
-# --- Блок платежей ---
+# --- Блок платежей (исправленный) ---
 @dp.callback_query_handler(lambda c: c.data.startswith("buy_"))
 async def buy_product(callback: CallbackQuery):
     if not PAYMENT_TOKEN:
@@ -200,14 +194,15 @@ async def buy_product(callback: CallbackQuery):
     )
     await callback.answer()
 
-@dp.pre_checkout_query()
-async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
+# В aiogram 2.x используется pre_checkout_query_handler, а не декоратор
+@dp.pre_checkout_query_handler()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
 
 @dp.message_handler(content_types=types.ContentType.SUCCESSFUL_PAYMENT)
 async def successful_payment(message: Message):
     payload = message.successful_payment.invoice_payload
-    orders.append(payload)  # сохраняем заказ
+    orders.append(payload)
     await message.answer(
         f"✅ *Оплата прошла успешно!*\n"
         f"Номер заказа: `{payload}`\n"
@@ -216,7 +211,7 @@ async def successful_payment(message: Message):
         reply_markup=main_keyboard(message.from_user.id)
     )
 
-# --- Блок заявок (сбор контактов) ---
+# --- Блок заявок ---
 @dp.message_handler(lambda msg: msg.text == "✍️ Оставить заявку")
 async def start_order(message: Message):
     await message.answer(
@@ -247,7 +242,6 @@ async def process_comment(message: Message, state: FSMContext):
     phone = data['phone']
     user_id = message.from_user.id
 
-    # Отправляем заявку админу
     if ADMIN_ID:
         admin_msg = (f"📬 *Новая заявка*\n"
                      f"👤 Имя: {name}\n"
@@ -259,7 +253,6 @@ async def process_comment(message: Message, state: FSMContext):
         except Exception as e:
             logging.error(f"Не удалось отправить заявку админу: {e}")
 
-    # Сохраняем в список заказов
     orders.append({"user": user_id, "name": name, "phone": phone, "comment": comment})
 
     await message.answer(
@@ -305,18 +298,17 @@ async def admin_stats(message: Message):
         reply_markup=admin_keyboard()
     )
 
+# --- Заглушка для рассылки (можно реализовать позже) ---
 @dp.message_handler(lambda msg: msg.text == "📢 Сделать рассылку" and msg.from_user.id == ADMIN_ID)
 async def admin_broadcast_start(message: Message):
     await message.answer(
-        "📢 *Режим рассылки*\n\n"
-        "Отправьте сообщение, которое хотите разослать всем пользователям.\n"
-        "Для отмены отправьте /cancel",
-        parse_mode="Markdown"
+        "📢 *Функция рассылки в разработке.*\n"
+        "В будущем здесь можно будет отправлять сообщения всем пользователям.",
+        parse_mode="Markdown",
+        reply_markup=admin_keyboard()
     )
-    # Здесь можно добавить состояние для рассылки, но для простоты реализуем в следующем хэндлере
-    # Я оставлю это как точку для расширения. Пока просто выведем список пользователей в консоль.
 
-# --- Обработка остальных сообщений (fallback) ---
+# --- Обработка остальных сообщений ---
 @dp.message_handler()
 async def other_messages(message: Message):
     await message.answer(
