@@ -4,6 +4,7 @@ import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
+from aiogram.dispatcher.filters.state import State, StatesGroup
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +16,10 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
+# Определяем состояния
+class QuestionState(StatesGroup):
+    waiting = State()
+
 # --- Данные магазина ---
 products = {
     "gaming_pc": {"title": "Игровой ПК \"Gamer Pro\"", "description": "Топовый компьютер для игр и работы.", "price": 1500000},
@@ -23,18 +28,17 @@ products = {
 
 # --- Клавиатуры ---
 def get_main_keyboard():
-    """Главное меню"""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("💻 Задать вопрос"))
     kb.add(KeyboardButton("🛍️ Каталог"), KeyboardButton("📞 Связаться"))
     return kb
 
 def get_back_keyboard():
-    """Клавиатура с кнопкой возврата в главное меню"""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("🏠 В главное меню"))
     return kb
 
+# --- Обработчики ---
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: Message):
     await message.answer(
@@ -43,12 +47,10 @@ async def cmd_start(message: Message):
         reply_markup=get_main_keyboard()
     )
 
-# --- Обработчик кнопки возврата ---
 @dp.message_handler(lambda msg: msg.text == "🏠 В главное меню")
 async def back_to_main(message: Message):
     await cmd_start(message)
 
-# --- Блок вопросов ---
 @dp.message_handler(lambda msg: msg.text == "💻 Задать вопрос")
 async def ask_question(message: Message):
     await message.answer(
@@ -56,9 +58,10 @@ async def ask_question(message: Message):
         "Или нажми кнопку ниже, чтобы вернуться.",
         reply_markup=get_back_keyboard()
     )
-    dp.current_state(user=message.from_user.id).set_state("waiting_question")
+    # Правильный асинхронный вызов
+    await QuestionState.waiting.set()
 
-@dp.message_handler(state="waiting_question")
+@dp.message_handler(state=QuestionState.waiting)
 async def handle_question(message: Message):
     text = message.text.lower()
     await message.answer("🤔 Думаю...")
@@ -71,12 +74,10 @@ async def handle_question(message: Message):
     else:
         reply = "❓ Я не совсем понял вопрос. Посмотрите каталог или свяжитесь с менеджером."
 
-    # Кнопка для перехода в каталог
     ikb = InlineKeyboardMarkup().add(InlineKeyboardButton("🛒 Перейти в каталог", callback_data="catalog"))
     await message.answer(reply, reply_markup=ikb)
-    await dp.current_state(user=message.from_user.id).reset_state()
+    await QuestionState.waiting.reset_state()
 
-# --- Блок каталога ---
 @dp.message_handler(lambda msg: msg.text == "🛍️ Каталог")
 async def show_catalog(message: Message):
     ikb = InlineKeyboardMarkup(row_width=1)
@@ -105,7 +106,6 @@ async def back_to_catalog(callback: CallbackQuery):
     await callback.message.delete()
     await show_catalog(callback.message)
 
-# --- Блок связи ---
 @dp.message_handler(lambda msg: msg.text == "📞 Связаться")
 async def contact(message: Message):
     await message.answer(
@@ -124,7 +124,6 @@ async def contact_callback(callback: CallbackQuery):
     )
     await callback.answer()
 
-# --- Обработка всего остального ---
 @dp.message_handler()
 async def other(message: Message):
     await message.answer(
